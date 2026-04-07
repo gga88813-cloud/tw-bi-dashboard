@@ -374,26 +374,158 @@ function parseLastYearSheet(text){
   return rows;
 }
 
+// ═══ 组长独立表格配置 ═══
+const LEADER_SHEETS = {
+  op1: {id:'1jR0LWnIClwDq0-nNC1yCACntEw3dTk2QiHXEyUCBEsk', gid:'90530566'},
+  op2: {id:'1btzRC8eMUdYhH3RRsstPW9HOSuue2DQOvKbie4MPJWo', gid:'0'},
+  op3: {id:'1dbdsfiL9w1p_KiJQmpOmht5BTnLH-iKO', gid:'545885725'},
+};
+
+// ═══ 运营一组解析器（矩阵格式）═══
+// 横向：日期+人员，纵向：指标/产品
+function parseOp1Leader(text){
+  const lines=text.trim().split('\n').map(l=>splitCSVLine(l));
+  if(lines.length<3) return [];
+  const rows=[];
+  // 第1行：年份和日期 "2026","3/30","","","","","","3/31",...
+  // 第2行：月份/序号和人员名 "3","","","悠扣","","喬治亞","柚子","信杰",...
+  const yearRow=lines[0];
+  const personRow=lines[1];
+  const year=yearRow[0]||'2026';
+
+  // 找出每个日期块：日期在第1行非空列
+  const dateBlocks=[];
+  for(let c=1;c<yearRow.length;c++){
+    const v=yearRow[c].trim();
+    if(v && v.match(/^\d+\/\d+$/)){
+      // 找这个日期块下的人员（第2行从c开始到下一个日期块之前）
+      const persons=[];
+      for(let pc=c;pc<yearRow.length;pc++){
+        if(pc>c && yearRow[pc].trim().match(/^\d+\/\d+$/)) break;
+        const pName=normalizeName(personRow[pc]);
+        if(pName && !pName.match(/^\d+$/)) persons.push({col:pc, name:pName});
+      }
+      dateBlocks.push({dateStr:`${year}.${v}`, col:c, persons});
+    }
+  }
+
+  // 指标行映射（第3行开始）
+  // 关键汇总行：剪辑总量→剪辑视频, App更新总量→推片, 文案帖子→标题关键词优化, Web视频推送→上传发布, Web优化上架→审核
+  const METRIC_MAP={
+    '剪辑总量':'剪辑视频','App 更新总量':'推片','文案帖子':'标题关键词优化',
+    'Web 视频推送':'上传发布','Web 优化上架':'审核'
+  };
+
+  for(let r=2;r<lines.length;r++){
+    const label=(lines[r][0]||'').trim();
+    const metric=METRIC_MAP[label];
+    if(!metric) continue;
+    const metricIdx=metricNames.indexOf(metric);
+    if(metricIdx<0) continue;
+
+    dateBlocks.forEach(db=>{
+      db.persons.forEach(p=>{
+        const val=parseNum(lines[r][p.col]);
+        if(val>0){
+          // 创建或更新这个人这天的记录
+          const key=db.dateStr+'|'+p.name;
+          let existing=rows.find(row=>row._key===key);
+          if(!existing){
+            existing=[db.dateStr,p.name,'运营一组','汇总',0,0,0,0,0,0];
+            existing._key=key;
+            rows.push(existing);
+          }
+          existing[metricIdx+4]+=val;
+        }
+      });
+    });
+  }
+  console.log('运营一组(组长表)解析:', rows.length, '条');
+  return rows;
+}
+
+// ═══ 运营二组解析器（标准格式）═══
+// 月份,人员,周数,资源平台同步,视频制作,视频销量
+function parseOp2Leader(text){
+  const lines=text.trim().split('\n');
+  const rows=[];
+  for(let i=1;i<lines.length;i++){
+    const cols=splitCSVLine(lines[i]);
+    const monthStr=(cols[0]||'').trim(); // "2026-03"
+    const name=normalizeName(cols[1]);
+    const week=(cols[2]||'').trim(); // "W1"
+    if(!monthStr||!name||name==='人員') continue;
+    // 用月份+周数的周一日期
+    const mMatch=monthStr.match(/(\d{4})-(\d{1,2})/);
+    if(!mMatch) continue;
+    const wNum=parseInt((week||'').replace(/\D/g,''))||1;
+    const dateStr=`${mMatch[1]}.${mMatch[2]}/${Math.min(28,(wNum-1)*7+1)}`;
+    // 映射：资源平台同步→同步视频, 视频制作→剪辑视频, 视频销量→推片
+    const sync=parseNum(cols[3]);
+    const produce=parseNum(cols[4]);
+    const sales=parseNum(cols[5]);
+    if(sync+produce+sales===0) continue;
+    rows.push([dateStr,name,'运营二组','汇总',sales,0,produce,0,0,sync]);
+  }
+  console.log('运营二组(组长表)解析:', rows.length, '条');
+  return rows;
+}
+
+// ═══ 运营三组解析器（横向日期格式）═══
+// 每行一天，前6列是日汇总，然后每10列一个产品块
+// 产品块结构：序号, 工作类型, 7个产品值, 空列, 小计
+function parseOp3Leader(text){
+  const lines=text.trim().split('\n').map(l=>splitCSVLine(l));
+  if(lines.length<2) return [];
+  const rows=[];
+  // 产品名称列表（运营三组的产品）
+  const OP3_PRODUCTS=['91Porna','搜同_WEB','Miss AV','SQ好色TV','玩物社区','男同网','91hub','MissAV','91Porna_WEB'];
+
+  for(let i=1;i<lines.length;i++){
+    const cols=lines[i];
+    const dateStr=(cols[0]||'').trim();
+    if(!dateStr || !dateStr.match(/^\d{4}/)) continue;
+    // 前6列：日期, 总推送, 总优化上架, ?, ?, ?
+    const dayTotal={push:parseNum(cols[1]), pushOpt:parseNum(cols[2]), opt:parseNum(cols[3])};
+
+    // 遍历产品块（从第8列开始，每11列一个块）
+    // 块结构：序号,工作类型,产品1值,...产品7值,空,小计
+    let c=7;
+    const workType=(cols[8]||'').trim(); // 视频推送/推送优化上架/优化上架
+    const blockSize=11;
+
+    // 简化：用每天的汇总数据创建一行
+    const totalAll=dayTotal.push+dayTotal.pushOpt+dayTotal.opt+parseNum(cols[4])+parseNum(cols[5]);
+    if(totalAll>0){
+      // 运营三组的数据按天汇总（无法从这个格式准确拆分到个人）
+      rows.push([dateStr.replace(/-/g,'/'), '运营三组','运营三组','汇总',
+        0,0,0, dayTotal.push, dayTotal.pushOpt, dayTotal.opt]);
+    }
+  }
+  console.log('运营三组(组长表)解析:', rows.length, '条');
+  return rows;
+}
+
 async function loadWorkFromSheet(){
-  // 读取「工作内容」+「运营二组源表(gid=2003389453)」+「历史数据-Q1」+「前年数据」
-  // 注：「工作内容」里运营二组数据是IMPORTRANGE，CSV导出为空，需要直接读源表
-  const [text1, textOp1, textOp2, textOp3, textQ1, textLY] = await Promise.all([
+  // 并行读取：BI主表 + 三个组长独立表 + 历史数据 + 前年数据
+  const [text1, textL1, textL2, textL3, textQ1, textLY] = await Promise.all([
     fetchCSV(`https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=%E5%B7%A5%E4%BD%9C%E5%86%85%E5%AE%B9`),
-    fetchCSV(`https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&gid=1945001644`),
-    fetchCSV(`https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&gid=2003389453`),
-    fetchCSV(`https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&gid=1682208915`),
-    fetchCSV(`https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=%E5%8E%86%E5%8F%B2%E6%95%B0%E6%8D%AE-Q1`),
-    fetchCSV(`https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=%E5%89%8D%E5%B9%B4%E6%95%B0%E6%8D%AE`),
+    fetchCSV(`https://docs.google.com/spreadsheets/d/${LEADER_SHEETS.op1.id}/gviz/tq?tqx=out:csv&gid=${LEADER_SHEETS.op1.gid}`),
+    fetchCSV(`https://docs.google.com/spreadsheets/d/${LEADER_SHEETS.op2.id}/gviz/tq?tqx=out:csv&gid=${LEADER_SHEETS.op2.gid}`),
+    fetchCSV(`https://docs.google.com/spreadsheets/d/${LEADER_SHEETS.op3.id}/gviz/tq?tqx=out:csv&gid=${LEADER_SHEETS.op3.gid}`),
+    fetchCSV(`https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=%E5%8E%86%E5%8F%B2%E6%95%B0%E6%8D%AE-Q1`).catch(()=>''),
+    fetchCSV(`https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=%E5%89%8D%E5%B9%B4%E6%95%B0%E6%8D%AE`).catch(()=>''),
   ]);
   const rowsMain = parseWorkRows(text1, 2);
-  const rowsOp1 = parseWorkRows(textOp1, 1);
-  const rowsOp2 = parseWorkRows(textOp2, 1);
-  const rowsOp3 = parseWorkRows(textOp3, 1);
-  const rowsQ1 = parseWorkRows(textQ1, 1);
-  const rowsLY = parseLastYearSheet(textLY);
-  // 合并：优先用各组源表数据（IMPORTRANGE导出为空），再补充主表有值的行
-  const merged = [...rowsOp1, ...rowsOp2, ...rowsOp3, ...rowsMain.filter(r => r[4]+r[5]+r[6]+r[7]+r[8]+r[9] > 0), ...rowsQ1, ...rowsLY];
-  // 去重：同人同日同产品只保留有数据的
+  const rowsL1 = parseOp1Leader(textL1);
+  const rowsL2 = parseOp2Leader(textL2);
+  const rowsL3 = parseOp3Leader(textL3);
+  const rowsQ1 = textQ1 ? parseWorkRows(textQ1, 1) : [];
+  const rowsLY = textLY ? parseLastYearSheet(textLY) : [];
+
+  // 合并所有数据源，优先组长表
+  const merged = [...rowsL1, ...rowsL2, ...rowsL3, ...rowsMain.filter(r=>r[4]+r[5]+r[6]+r[7]+r[8]+r[9]>0), ...rowsQ1, ...rowsLY];
+  // 去重
   const seen = {};
   const deduped = [];
   merged.forEach(r => {
@@ -401,7 +533,7 @@ async function loadWorkFromSheet(){
     const total = r[4]+r[5]+r[6]+r[7]+r[8]+r[9];
     if(!seen[key] || total > 0) { seen[key] = true; deduped.push(r); }
   });
-  console.log('1组源:', rowsOp1.length, '| 2组源:', rowsOp2.length, '| 3组源:', rowsOp3.length, '| Q1:', rowsQ1.length, '| 前年:', rowsLY.length, '| 去重后:', deduped.length);
+  console.log('主表:', rowsMain.length, '| 1组长:', rowsL1.length, '| 2组长:', rowsL2.length, '| 3组长:', rowsL3.length, '| Q1:', rowsQ1.length, '| 前年:', rowsLY.length, '| 合计:', deduped.length);
   return deduped;
 }
 
@@ -545,38 +677,74 @@ function updateKPIs() {
 const LEADERS = ['辉锅','杜兰特','凯瑞莎','柚子','庆记'];
 
 function getLeaderEval(name, total, days, pData) {
-  const avg = days > 0 ? Math.round(total / days) : 0;
-  // 各指标汇总
+  if(!pData.length) return { grade:'-', color:'#bbb', emoji:'❓', comment:'本期暂无数据记录。', detail:'' };
+
+  // ═══ 各指标汇总 ═══
   const metrics = {};
   metricNames.forEach((m,i) => { metrics[m] = pData.reduce((s,r) => s + r[i+4], 0); });
-  // 找最强和最弱指标
   const sorted = metricNames.map(m => ({name:m, val:metrics[m]})).sort((a,b) => b.val - a.val);
-  const best = sorted[0], worst = sorted[sorted.length-1];
+  const best = sorted[0], worst = sorted.filter(s=>s.val>0).pop() || sorted[sorted.length-1];
 
-  let grade, color, emoji, comment;
-  if(avg >= 150) {
-    grade = 'S'; color = '#faad14'; emoji = '🏆';
-    comment = `表现卓越，日均产量${avg}，远超团队平均水平。`;
-  } else if(avg >= 100) {
-    grade = 'A'; color = '#52c41a'; emoji = '⭐';
-    comment = `表现优秀，工作量稳定，是团队核心力量。`;
-  } else if(avg >= 60) {
-    grade = 'B'; color = '#1890ff'; emoji = '👍';
-    comment = `表现良好，建议在${worst.name}方面加强投入。`;
-  } else if(avg >= 30) {
-    grade = 'C'; color = '#fa8c16'; emoji = '📊';
-    comment = `产量一般，建议提升${worst.name}效率，向${best.name}方向发力。`;
-  } else if(total > 0) {
-    grade = 'D'; color = '#ff4d4f'; emoji = '⚠️';
-    comment = `产量偏低，需重点关注工作安排，建议一对一沟通。`;
-  } else {
-    grade = '-'; color = '#bbb'; emoji = '❓';
-    comment = `本期暂无数据记录。`;
-  }
+  // ═══ 1. 目标达成情况 (50%) ═══
+  // 目标值 = 同组同期所有人的平均值（动态基准）
+  const groupData = workData.filter(r => {
+    const p = personnelInfo.find(pi => pi.name === r[1]);
+    const myGroup = personnelInfo.find(pi => pi.name === name);
+    if(!p || !myGroup) return false;
+    const dt = parseDate(r[0]);
+    return p.group === myGroup.group && dt >= dateStart && dt <= dateEnd;
+  });
+  const groupPersons = {};
+  groupData.forEach(r => {
+    groupPersons[r[1]] = (groupPersons[r[1]]||0) + r[4]+r[5]+r[6]+r[7]+r[8]+r[9];
+  });
+  const gpValues = Object.values(groupPersons);
+  const groupAvg = gpValues.length ? Math.round(gpValues.reduce((s,v)=>s+v,0) / gpValues.length) : 0;
+  const target = groupAvg || 1;
+  const achieveRate = Math.round(total / target * 100);
+  const achieveScore = Math.min(100, achieveRate); // 满分100
 
-  const suggestion = total > 0 ? `强项：${best.name}(${best.val})｜弱项：${worst.name}(${worst.val})` : '';
+  // ═══ 2. 工作态度与质量 (30%) ═══
+  // 衡量：覆盖指标数（广度）+ 产出均衡度（无明显短板）
+  const activeMetrics = metricNames.filter(m => metrics[m] > 0).length;
+  const breadthScore = Math.round(activeMetrics / metricNames.length * 100); // 覆盖率
+  // 均衡度：最高指标与最低有效指标的比值，越接近1越均衡
+  const activeVals = sorted.filter(s=>s.val>0).map(s=>s.val);
+  const balanceScore = activeVals.length >= 2 ? Math.round(Math.min(activeVals[activeVals.length-1],activeVals[0]) / Math.max(activeVals[activeVals.length-1],activeVals[0]) * 100) : 50;
+  const qualityScore = Math.round(breadthScore * 0.6 + balanceScore * 0.4);
 
-  return { grade, color, emoji, comment, suggestion };
+  // ═══ 加权总分 ═══
+  const finalScore = Math.round(achieveScore * 0.5 + qualityScore * 0.3 + Math.min(100, achieveRate) * 0.2);
+
+  let grade, color, emoji;
+  if(finalScore >= 90) { grade='S'; color='#faad14'; emoji='🏆'; }
+  else if(finalScore >= 75) { grade='A'; color='#52c41a'; emoji='⭐'; }
+  else if(finalScore >= 60) { grade='B'; color='#1890ff'; emoji='👍'; }
+  else if(finalScore >= 40) { grade='C'; color='#fa8c16'; emoji='📊'; }
+  else { grade='D'; color='#ff4d4f'; emoji='⚠️'; }
+
+  // ═══ 评语生成 ═══
+  // 目标达成评语
+  const achieveWord = achieveRate >= 120 ? '远超目标' : achieveRate >= 100 ? '达成目标' : achieveRate >= 80 ? '接近目标' : '未达目标';
+  const achieveColor = achieveRate >= 100 ? 'txt-good' : achieveRate >= 80 ? 'txt-warn' : 'txt-danger';
+
+  // 各指标明细
+  const metricDetail = metricNames.map(m => `${m} ${metrics[m].toLocaleString()}`).join('、');
+
+  // 质量评语
+  let qualityComment;
+  if(qualityScore >= 80) qualityComment = '工作覆盖全面，各项指标均衡，交付质量优秀，无明显短板。';
+  else if(qualityScore >= 60) qualityComment = `工作质量良好，${worst.name}产出相对较低（${worst.val}），建议适当加强。`;
+  else if(qualityScore >= 40) qualityComment = `工作覆盖面有限（${activeMetrics}/${metricNames.length}项），${worst.name}明显薄弱，需改善工作均衡性。`;
+  else qualityComment = `工作集中在少数指标，覆盖不足，建议拓展工作范围，提升综合能力。`;
+
+  const comment = `<b>【目标达成·50%】</b><span class="${achieveColor}">${achieveWord}</span>｜本期总产量 <b>${total.toLocaleString()}</b>，组内目标均值 <b>${target.toLocaleString()}</b>，达成率 <b class="${achieveColor}">${achieveRate}%</b>。明细：${metricDetail}。`
+    + `<br><b>【工作质量·30%】</b>${qualityComment}`
+    + `<br><b>【综合评分】</b>${finalScore}分（达成${achieveScore}×50% + 质量${qualityScore}×30% + 贡献${Math.min(100,achieveRate)}×20%）`;
+
+  const detail = `强项：${best.name}(${best.val.toLocaleString()})｜需加强：${worst.name}(${worst.val.toLocaleString()})`;
+
+  return { grade, color, emoji, comment, detail, finalScore };
 }
 
 function buildPersonCard(p, isLeader) {
@@ -590,13 +758,13 @@ function buildPersonCard(p, isLeader) {
     const ev = getLeaderEval(p.name, total, days, pData);
     evalHTML = `
       <div style="margin-top:10px;padding-top:10px;border-top:1px solid ${document.body.classList.contains('dark')?'rgba(255,255,255,0.08)':'#f0f0f0'};">
-        <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
           <span style="font-size:16px;">${ev.emoji}</span>
-          <span style="font-size:20px;font-weight:800;color:${ev.color};">${ev.grade}</span>
-          <span style="font-size:12px;color:#999;">评级</span>
+          <span style="font-size:22px;font-weight:800;color:${ev.color};">${ev.grade}</span>
+          ${ev.finalScore ? `<span style="font-size:12px;color:#999;">${ev.finalScore}分</span>` : ''}
         </div>
-        <div style="font-size:12px;color:#666;line-height:1.6;">${ev.comment}</div>
-        ${ev.suggestion ? `<div style="font-size:11px;color:#999;margin-top:4px;">${ev.suggestion}</div>` : ''}
+        <div style="font-size:11px;line-height:1.8;color:${document.body.classList.contains('dark')?'#94A3B8':'#555'};">${ev.comment}</div>
+        ${ev.detail ? `<div style="font-size:11px;color:#999;margin-top:4px;">${ev.detail}</div>` : ''}
       </div>`;
   }
 
