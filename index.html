@@ -147,35 +147,55 @@
   </div>
 </div>
 
-<div class="filter-bar">
-  <span class="filter-label">团队筛选:</span>
-  <div class="group-tabs">
-    <div class="group-tab active" onclick="filterGroup('全部')">全部</div>
-    <div class="group-tab" onclick="filterGroup('运营一组')">运营一组</div>
-    <div class="group-tab" onclick="filterGroup('运营二组')">运营二组</div>
-    <div class="group-tab" onclick="filterGroup('运营三组')">运营三组</div>
+<div class="filter-bar" style="flex-direction:column;align-items:flex-start;gap:10px;">
+  <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
+    <span class="filter-label">团队筛选:</span>
+    <div class="group-tabs">
+      <div class="group-tab active" onclick="filterGroup('全部')">全部</div>
+      <div class="group-tab" onclick="filterGroup('运营一组')">运营一组</div>
+      <div class="group-tab" onclick="filterGroup('运营二组')">运营二组</div>
+      <div class="group-tab" onclick="filterGroup('运营三组')">运营三组</div>
+    </div>
+    <span class="filter-label">人员筛选:</span>
+    <select class="person-select" id="personSelect" onchange="filterPerson(this.value)">
+      <option value="全部">全部人员</option>
+    </select>
   </div>
-  <span class="filter-label" style="margin-left:16px;">人员筛选:</span>
-  <select class="person-select" id="personSelect" onchange="filterPerson(this.value)">
-    <option value="全部">全部人员</option>
-  </select>
-  <span class="filter-label" style="margin-left:16px;">时间:</span>
-  <div class="date-shortcuts" id="dateShortcuts">
-    <div class="date-shortcut" onclick="quickDate('today',this)">日</div>
-    <div class="date-shortcut" onclick="quickDate('yesterday',this)">昨日</div>
-    <div class="date-shortcut" onclick="quickDate('week',this)">周</div>
-    <div class="date-shortcut" onclick="quickDate('month',this)">月</div>
-    <div class="date-shortcut" onclick="quickDate('quarter',this)">季</div>
-    <div class="date-shortcut" onclick="quickDate('year',this)">年</div>
+  <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+    <span class="filter-label">时间:</span>
+    <div class="date-shortcuts" id="dateShortcuts">
+      <div class="date-shortcut" onclick="quickDate('today',this)">日</div>
+      <div class="date-shortcut" onclick="quickDate('yesterday',this)">昨日</div>
+      <div class="date-shortcut" onclick="quickDate('week',this)">周</div>
+      <div class="date-shortcut" onclick="quickDate('month',this)">月</div>
+      <div class="date-shortcut" onclick="quickDate('quarter',this)">季</div>
+      <div class="date-shortcut" onclick="quickDate('year',this)">年</div>
+    </div>
+    <input type="date" class="date-input" id="dateStart" value="2026-03-01" onchange="clearShortcutActive();filterDate()">
+    <span style="font-size:13px;color:#999;">至</span>
+    <input type="date" class="date-input" id="dateEnd" value="2026-03-31" onchange="clearShortcutActive();filterDate()">
+    <div class="date-reset" onclick="resetDate()">重置</div>
   </div>
-  <input type="date" class="date-input" id="dateStart" value="2026-03-01" onchange="clearShortcutActive();filterDate()">
-  <span style="font-size:13px;color:#999;">至</span>
-  <input type="date" class="date-input" id="dateEnd" value="2026-03-31" onchange="clearShortcutActive();filterDate()">
-  <div class="date-reset" onclick="resetDate()">重置</div>
 </div>
 
 <div class="container">
   <div class="kpi-row" id="kpiRow"></div>
+
+  <!-- 各组数据总览 -->
+  <div id="groupOverviewSection">
+    <div class="table-card" style="border-left:4px solid #1890ff;">
+      <h3 style="display:flex;align-items:center;gap:8px;">🎬 运营一组 <span style="font-size:12px;color:#999;font-weight:400;">数据来源：组长表格</span></h3>
+      <div class="kpi-row" id="op1Overview" style="grid-template-columns:repeat(6,1fr);"></div>
+    </div>
+    <div class="table-card" style="border-left:4px solid #fa8c16;margin-top:16px;">
+      <h3 style="display:flex;align-items:center;gap:8px;">📈 运营二组 <span style="font-size:12px;color:#999;font-weight:400;">数据来源：组长表格</span></h3>
+      <div class="kpi-row" id="op2Overview" style="grid-template-columns:repeat(3,1fr);"></div>
+    </div>
+    <div class="table-card" style="border-left:4px solid #52c41a;margin-top:16px;">
+      <h3 style="display:flex;align-items:center;gap:8px;">🚀 运营三组 <span style="font-size:12px;color:#999;font-weight:400;">数据来源：组长表格</span></h3>
+      <div class="kpi-row" id="op3Overview" style="grid-template-columns:repeat(3,1fr);"></div>
+    </div>
+  </div>
 
   <div id="personSection">
     <div class="table-card" style="border-top:3px solid #fa8c16;">
@@ -410,14 +430,31 @@ function parseOp1Leader(text){
   }
 
   // 指标行映射（第3行开始）
-  // 关键汇总行：剪辑总量→剪辑视频, App更新总量→推片, 文案帖子→标题关键词优化, Web视频推送→上传发布, Web优化上架→审核
   const METRIC_MAP={
     '剪辑总量':'剪辑视频','App 更新总量':'推片','文案帖子':'标题关键词优化',
     'Web 视频推送':'上传发布','Web 优化上架':'审核'
   };
+  // 完整指标（用于总览展示）
+  const ALL_OP1_METRICS=['剪辑总量','搜同社区 剪辑','玩物社区 剪辑','第一吃瓜网 剪辑',
+    'App 更新总量','推特射区','糖心','91抖阴',
+    '文案帖子','51动漫 成人文案','第一吃瓜网 帖子制作','KISSAV 帖子',
+    'Web 视频推送','搜同 原创视频','91探花',
+    'Web 优化上架','91探花 视频','禁漫天堂 漫画','禁漫天堂 小说','禁漫天堂 视频','91 hub 视频','KISSAV 视频',
+    '其他','第一吃瓜网 帖子审核','抖阴成人 视频分类质检','91探花 已上架视频优化','91探花 违禁词排查'];
+  const op1Detail={};
+  ALL_OP1_METRICS.forEach(m=>op1Detail[m]=0);
 
   for(let r=2;r<lines.length;r++){
     const label=(lines[r][0]||'').trim();
+    // 收集完整指标数据
+    if(ALL_OP1_METRICS.includes(label)){
+      dateBlocks.forEach(db=>{
+        db.persons.forEach(p=>{
+          const val=parseNum(lines[r][p.col]);
+          if(val>0) op1Detail[label]=(op1Detail[label]||0)+val;
+        });
+      });
+    }
     const metric=METRIC_MAP[label];
     if(!metric) continue;
     const metricIdx=metricNames.indexOf(metric);
@@ -427,7 +464,6 @@ function parseOp1Leader(text){
       db.persons.forEach(p=>{
         const val=parseNum(lines[r][p.col]);
         if(val>0){
-          // 创建或更新这个人这天的记录
           const key=db.dateStr+'|'+p.name;
           let existing=rows.find(row=>row._key===key);
           if(!existing){
@@ -440,7 +476,8 @@ function parseOp1Leader(text){
       });
     });
   }
-  console.log('运营一组(组长表)解析:', rows.length, '条');
+  GROUP_RAW.op1=op1Detail;
+  console.log('运营一组(组长表)解析:', rows.length, '条, 指标:', JSON.stringify(op1Detail));
   return rows;
 }
 
@@ -467,6 +504,10 @@ function parseOp2Leader(text){
     if(sync+produce+sales===0) continue;
     rows.push([dateStr,name,'运营二组','汇总',sales,0,produce,0,0,sync]);
   }
+  // 汇总
+  const op2Detail={'资源平台同步':0,'视频制作':0,'视频销量':0};
+  rows.forEach(r=>{op2Detail['视频销量']+=r[4];op2Detail['视频制作']+=r[6];op2Detail['资源平台同步']+=r[9];});
+  GROUP_RAW.op2=op2Detail;
   console.log('运营二组(组长表)解析:', rows.length, '条');
   return rows;
 }
@@ -502,6 +543,10 @@ function parseOp3Leader(text){
         0,0,0, dayTotal.push, dayTotal.pushOpt, dayTotal.opt]);
     }
   }
+  // 汇总
+  const op3Detail={'视频推送':0,'推送优化上架':0,'视频优化上架':0};
+  rows.forEach(r=>{op3Detail['视频推送']+=r[7];op3Detail['推送优化上架']+=r[8];op3Detail['视频优化上架']+=r[9];});
+  GROUP_RAW.op3=op3Detail;
   console.log('运营三组(组长表)解析:', rows.length, '条');
   return rows;
 }
@@ -539,6 +584,8 @@ async function loadWorkFromSheet(){
 
 let personnelInfo = [];
 let workData = [];
+// 各组长表格原始汇总数据（用于总览展示）
+let GROUP_RAW = {op1:{}, op2:{}, op3:{}};
 
 const metricNames = ["推片","标题关键词优化","剪辑视频","上传发布","审核","同步视频"];
 const groupColors = {"运营一组":"#1890ff","运营二组":"#fa8c16","运营三组":"#52c41a"};
@@ -917,8 +964,66 @@ function filterPerson(p) {
   render();
 }
 
+function renderGroupOverview(){
+  const isDark=document.body.classList.contains('dark');
+  const cardStyle=isDark?'background:#273449;':'background:#f8fafc;';
+  const showOp1=currentGroup==='全部'||currentGroup==='运营一组';
+  const showOp2=currentGroup==='全部'||currentGroup==='运营二组';
+  const showOp3=currentGroup==='全部'||currentGroup==='运营三组';
+  document.getElementById('op1Overview').parentElement.style.display=showOp1?'':'none';
+  document.getElementById('op2Overview').parentElement.style.display=showOp2?'':'none';
+  document.getElementById('op3Overview').parentElement.style.display=showOp3?'':'none';
+  if(!showOp1&&!showOp2&&!showOp3) return;
+
+  // 运营一组：6大类 + 细项
+  const op1=GROUP_RAW.op1||{};
+  const op1Main=[
+    {label:'剪辑总量',val:op1['剪辑总量']||0,color:'#1890ff',subs:['搜同社区 剪辑','玩物社区 剪辑','第一吃瓜网 剪辑']},
+    {label:'App 更新总量',val:op1['App 更新总量']||0,color:'#722ed1',subs:['推特射区','糖心','91抖阴']},
+    {label:'文案帖子',val:op1['文案帖子']||0,color:'#13c2c2',subs:['51动漫 成人文案','第一吃瓜网 帖子制作','KISSAV 帖子']},
+    {label:'Web 视频推送',val:op1['Web 视频推送']||0,color:'#eb2f96',subs:['搜同 原创视频','91探花']},
+    {label:'Web 优化上架',val:op1['Web 优化上架']||0,color:'#fa8c16',subs:['91探花 视频','禁漫天堂 漫画','禁漫天堂 小说','禁漫天堂 视频','91 hub 视频','KISSAV 视频']},
+    {label:'其他',val:op1['其他']||0,color:'#52c41a',subs:['第一吃瓜网 帖子审核','抖阴成人 视频分类质检','91探花 已上架视频优化','91探花 违禁词排查']},
+  ];
+  document.getElementById('op1Overview').innerHTML=op1Main.map(m=>{
+    const subHTML=m.subs.map(s=>`<div style="display:flex;justify-content:space-between;"><span>${s.replace(/ /g,' ')}</span><b>${(op1[s]||0).toLocaleString()}</b></div>`).join('');
+    return `<div class="kpi-card" style="${cardStyle}border-left:3px solid ${m.color};">
+      <div class="label">${m.label}</div>
+      <div class="value" style="color:${m.color}">${m.val.toLocaleString()}</div>
+      <div style="margin-top:8px;font-size:11px;color:${isDark?'#94A3B8':'#888'};line-height:1.8;">${subHTML}</div>
+    </div>`;
+  }).join('');
+
+  // 运营二组
+  const op2=GROUP_RAW.op2||{};
+  const op2Items=[
+    {label:'资源平台同步',val:op2['资源平台同步']||0,color:'#1890ff'},
+    {label:'视频制作',val:op2['视频制作']||0,color:'#fa8c16'},
+    {label:'视频销量',val:op2['视频销量']||0,color:'#52c41a'},
+  ];
+  document.getElementById('op2Overview').innerHTML=op2Items.map(m=>`
+    <div class="kpi-card" style="${cardStyle}border-left:3px solid ${m.color};">
+      <div class="label">${m.label}</div>
+      <div class="value" style="color:${m.color}">${m.val.toLocaleString()}</div>
+    </div>`).join('');
+
+  // 运营三组
+  const op3=GROUP_RAW.op3||{};
+  const op3Items=[
+    {label:'视频推送',val:op3['视频推送']||0,color:'#1890ff'},
+    {label:'推送优化上架',val:op3['推送优化上架']||0,color:'#fa8c16'},
+    {label:'视频优化上架',val:op3['视频优化上架']||0,color:'#52c41a'},
+  ];
+  document.getElementById('op3Overview').innerHTML=op3Items.map(m=>`
+    <div class="kpi-card" style="${cardStyle}border-left:3px solid ${m.color};">
+      <div class="label">${m.label}</div>
+      <div class="value" style="color:${m.color}">${m.val.toLocaleString()}</div>
+    </div>`).join('');
+}
+
 function render() {
   updateKPIs();
+  renderGroupOverview();
   updatePersonGrid();
   updateGroupChart();
   updateProductChart();
